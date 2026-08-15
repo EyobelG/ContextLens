@@ -1,0 +1,39 @@
+{
+  "name": "context-lens",
+  "displayName": "ContextLens",
+  "description": "Generate and verify Python unit tests with CodeLens and codebase context.",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Programming Languages", "Testing"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onLanguage:python", "onCommand:contextLens.generateTest"],
+  "contributes": {
+    "commands": [{ "command": "contextLens.generateTest", "title": "ContextLens: Generate Unit Tests" }],
+    "configuration": {
+      "title": "ContextLens",
+      "properties": {
+        "contextLens.apiKey": { "type": "string", "default": "", "markdownDescription": "API key for an OpenAI-compatible chat-completions endpoint." },
+        "contextLens.apiBaseUrl": { "type": "string", "default": "https://api.openai.com/v1", "description": "OpenAI-compatible API base URL." },
+        "contextLens.model": { "type": "string", "default": "gpt-4.1-mini", "description": "Model used to synthesize tests." },
+        "contextLens.pythonPath": { "type": "string", "default": "python3", "description": "Python executable used to verify generated tests." }
+      }
+    },
+    "menus": { "editor/context": [{ "command": "contextLens.generateTest", "when": "editorHasSelection", "group": "navigation" }] }
+  },
+  "scripts": {
+    "vscode:prepublish": "node esbuild.js --production",
+    "compile": "tsc --noEmit && node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "lint": "eslint src --ext .ts",
+    "test": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "esbuild": "^0.23.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.5.0"
+  }
+}

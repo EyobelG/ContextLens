@@ -3,22 +3,79 @@
   "displayName": "ContextLens",
   "description": "Generate and verify Python unit tests with CodeLens and codebase context.",
   "version": "0.1.0",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Programming Languages", "Testing"],
+  "publisher": "eyobelg",
+  "author": "Eyobel Gebre",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EyobelG/ContextLens.git",
+    "directory": "context-lens"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Testing"
+  ],
   "main": "./dist/extension.js",
-  "activationEvents": ["onLanguage:python", "onCommand:contextLens.generateTest"],
+  "activationEvents": [
+    "onLanguage:python",
+    "onCommand:contextLens.generateTest"
+  ],
   "contributes": {
-    "commands": [{ "command": "contextLens.generateTest", "title": "ContextLens: Generate Unit Tests" }],
+    "commands": [
+      {
+        "command": "contextLens.generateTest",
+        "title": "ContextLens: Generate Unit Tests"
+      }
+    ],
     "configuration": {
       "title": "ContextLens",
       "properties": {
-        "contextLens.apiKey": { "type": "string", "default": "", "markdownDescription": "API key for an OpenAI-compatible chat-completions endpoint." },
-        "contextLens.apiBaseUrl": { "type": "string", "default": "https://api.openai.com/v1", "description": "OpenAI-compatible API base URL." },
-        "contextLens.model": { "type": "string", "default": "gpt-4.1-mini", "description": "Model used to synthesize tests." },
-        "contextLens.pythonPath": { "type": "string", "default": "python3", "description": "Python executable used to verify generated tests." }
+        "contextLens.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "API key for an OpenAI-compatible chat-completions endpoint, an Anthropic API key (`sk-ant-...`), or a Google Gemini API key (`AIza...`). Falls back to the `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or `OPENAI_API_KEY` environment variable when left blank."
+        },
+        "contextLens.apiBaseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "OpenAI-compatible API base URL. Ignored when calling Anthropic or Gemini directly."
+        },
+        "contextLens.model": {
+          "type": "string",
+          "default": "gpt-4.1-mini",
+          "description": "Model used to synthesize tests."
+        },
+        "contextLens.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Python executable used to verify generated tests."
+        },
+        "contextLens.provider": {
+          "type": "string",
+          "enum": ["auto", "openai", "anthropic", "gemini"],
+          "default": "auto",
+          "description": "Which API to call. 'auto' guesses from the API key format / base URL; set this explicitly if your key doesn't match the expected prefix."
+        },
+        "contextLens.maxRetries": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "description": "Maximum generate-and-verify attempts before giving up."
+        }
       }
     },
-    "menus": { "editor/context": [{ "command": "contextLens.generateTest", "when": "editorHasSelection", "group": "navigation" }] }
+    "menus": {
+      "editor/context": [
+        {
+          "command": "contextLens.generateTest",
+          "when": "editorHasSelection",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "node esbuild.js --production",
@@ -29,7 +86,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/vscode": "^1.90.0",
+    "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "esbuild": "^0.23.0",

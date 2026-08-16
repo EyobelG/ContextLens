@@ -40,12 +40,14 @@ npm run lint       # eslint src --ext .ts
 ## Test
 
 ```bash
-npm test           # currently just runs `npm run compile`; no unit test suite exists yet
+npm test           # compile, then run unit tests
+npm run test:unit  # node --import tsx --test src/*.test.ts (no build step required)
 ```
 
-To exercise the extension itself: open this folder in VS Code and press F5 (or use the "Run Extension"
-launch config in `.vscode/launch.json`), which runs `npm: watch` and opens an Extension Development
-Host window. Open a `.py` file there to see the CodeLens.
+Unit tests exist only for `astExtractor.ts` and `ragEngine.ts` (the two modules with no `vscode`
+import). To exercise the rest of the extension: open this folder in VS Code and press F5 (or use the
+"Run Extension" launch config in `.vscode/launch.json`), which runs `npm: watch` and opens an
+Extension Development Host window. Open a `.py` file there to see the CodeLens.
 
 ## Before committing
 
@@ -54,9 +56,10 @@ Run, in order:
 ```bash
 npm run compile
 npm run lint
+npm run test:unit
 ```
 
-Both must pass with no errors. There is no CI config in this repo yet, so these are the only
+All three must pass with no errors. There is no CI config in this repo yet, so these are the only
 automated gates — treat them as required.
 
 ## Conventions

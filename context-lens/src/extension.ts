@@ -8,12 +8,21 @@ const ragIndexes = new Map<string, WorkspaceRagIndex>();
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("ContextLens");
+  const watcher = vscode.workspace.createFileSystemWatcher("**/*.{py,pyi}");
+  const invalidateIndex = (uri: vscode.Uri) => {
+    const root = vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
+    if (root) ragIndexes.delete(root);
+  };
+  watcher.onDidCreate(invalidateIndex);
+  watcher.onDidChange(invalidateIndex);
+  watcher.onDidDelete(invalidateIndex);
 
   context.subscriptions.push(
     output,
+    watcher,
     vscode.languages.registerCodeLensProvider({ language: "python" }, new FunctionTestCodeLensProvider()),
-    vscode.commands.registerCommand("contextLens.generateTest", (rawCodeArg?: string) =>
-      generateTest(rawCodeArg, output)
+    vscode.commands.registerCommand("contextLens.generateTest", (rawCodeArg?: string, focusSymbolArg?: string) =>
+      generateTest(rawCodeArg, focusSymbolArg, output)
     )
   );
 }
@@ -22,7 +31,7 @@ export function deactivate(): void {
   ragIndexes.clear();
 }
 
-async function generateTest(rawCodeArg: string | undefined, output: vscode.OutputChannel): Promise<void> {
+async function generateTest(rawCodeArg: string | undefined, focusSymbolArg: string | undefined, output: vscode.OutputChannel): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.document.languageId !== "python") {
     vscode.window.showErrorMessage("ContextLens: open a Python file first.");
@@ -36,11 +45,11 @@ async function generateTest(rawCodeArg: string | undefined, output: vscode.Outpu
   }
 
   try {
-    const dependencies = extractPythonDependencies(editor.document.getText(), rawCode);
+    const dependencies = extractPythonDependencies(editor.document.getText(), rawCode, focusSymbolArg);
 
     await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: "ContextLens", cancellable: false },
-      async (progress) => {
+      { location: vscode.ProgressLocation.Notification, title: "ContextLens", cancellable: true },
+      async (progress, token) => {
         const index = await getWorkspaceIndex(editor.document.uri, (message) => {
           output.appendLine(message);
           progress.report({ message });
@@ -49,7 +58,7 @@ async function generateTest(rawCodeArg: string | undefined, output: vscode.Outpu
         const result = await synthesizeVerifiedTests(rawCode, dependencies, index, (message) => {
           output.appendLine(message);
           progress.report({ message });
-        });
+        }, token);
 
         const analysisComment = result.analysis
           ? `# ContextLens analysis of "${dependencies.functionName}":\n${result.analysis.split("\n").map((line) => `# ${line}`).join("\n")}\n\n`
@@ -66,6 +75,10 @@ async function generateTest(rawCodeArg: string | undefined, output: vscode.Outpu
       }
     );
   } catch (error) {
+    if (error instanceof vscode.CancellationError) {
+      output.appendLine("Cancelled by user.");
+      return;
+    }
     const message = error instanceof Error ? error.message : String(error);
     output.appendLine(`Error: ${message}`);
     output.show(true);

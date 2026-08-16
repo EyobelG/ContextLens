@@ -1,8 +1,9 @@
 {
-  "name": "context-lens",
-  "displayName": "ContextLens",
-  "description": "Generate and verify Python unit tests with CodeLens and codebase context.",
+  "name": "context-lens-python",
+  "displayName": "ContextLens: Python Tests",
+  "description": "Generate and sandbox-verify Python unit tests via CodeLens, with RAG-retrieved codebase context and an AI code review of bugs/duplication after tests pass. Supports OpenAI-compatible, Anthropic, and Gemini APIs.",
   "version": "0.1.0",
+  "icon": "assets/icon.png",
   "publisher": "eyobelg",
   "author": "Eyobel Gebre",
   "license": "MIT",
@@ -55,7 +56,12 @@
         },
         "contextLens.provider": {
           "type": "string",
-          "enum": ["auto", "openai", "anthropic", "gemini"],
+          "enum": [
+            "auto",
+            "openai",
+            "anthropic",
+            "gemini"
+          ],
           "default": "auto",
           "description": "Which API to call. 'auto' guesses from the API key format / base URL; set this explicitly if your key doesn't match the expected prefix."
         },
@@ -64,6 +70,19 @@
           "default": 3,
           "minimum": 1,
           "description": "Maximum generate-and-verify attempts before giving up."
+        },
+        "contextLens.temperature": {
+          "type": "number",
+          "default": 0.1,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature sent to the model for both test generation and analysis. Lower is more deterministic."
+        },
+        "contextLens.maxOutputTokens": {
+          "type": "number",
+          "default": 4096,
+          "minimum": 256,
+          "description": "Maximum output tokens requested from the model per call. Increase for very large functions/classes."
         }
       }
     },
@@ -82,7 +101,8 @@
     "compile": "tsc --noEmit && node esbuild.js",
     "watch": "node esbuild.js --watch",
     "lint": "eslint src --ext .ts",
-    "test": "npm run compile"
+    "test:unit": "node --import tsx --test src/*.test.ts",
+    "test": "npm run compile && npm run test:unit"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -91,6 +111,7 @@
     "@typescript-eslint/parser": "^8.0.0",
     "esbuild": "^0.23.0",
     "eslint": "^9.0.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.5.0"
   }
 }

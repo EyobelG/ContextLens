@@ -88,7 +88,21 @@ function classify(name: string, content: string): Chunk["kind"] {
   return "source";
 }
 function trimChunk(content: string): string { return content.length > MAX_CHUNK_CHARS ? content.slice(0, MAX_CHUNK_CHARS) : content; }
-function tokenize(value: string): Set<string> { return new Set(value.toLowerCase().match(/[a-z_][a-z0-9_]*/g) ?? []); }
+
+// Common Python keywords/builtins are near-universal across any two files and carry no
+// discriminating signal for relevance; excluding them from *query* terms keeps retrieval from
+// matching purely on boilerplate (e.g. two unrelated files both containing "def" and "return").
+const STOPWORDS = new Set([
+  "def", "class", "return", "self", "cls", "import", "from", "as", "if", "elif", "else", "for",
+  "while", "try", "except", "finally", "with", "pass", "break", "continue", "lambda", "yield",
+  "raise", "assert", "true", "false", "none", "and", "or", "not", "in", "is", "async", "await",
+  "global", "nonlocal", "del", "py", "pyi"
+]);
+
+function tokenize(value: string): Set<string> {
+  const tokens = value.toLowerCase().match(/[a-z_][a-z0-9_]*/g) ?? [];
+  return new Set(tokens.filter((token) => !STOPWORDS.has(token)));
+}
 
 function score(chunk: Chunk, terms: Set<string>, preferTestArtifacts: boolean): number {
   const counts = tokenizeWithCounts(`${chunk.file} ${chunk.symbol ?? ""} ${chunk.content}`);

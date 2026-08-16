@@ -2,7 +2,7 @@
   "name": "context-lens-python",
   "displayName": "ContextLens: Verified Tests",
   "description": "Generate and sandbox-verify unit tests for Python, JavaScript, and TypeScript via CodeLens, with RAG-retrieved codebase context, plus an inline AI \"Explain Issues\" code review. Supports OpenAI-compatible, Anthropic, and Gemini APIs.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "icon": "assets/icon.png",
   "publisher": "eyobelg",
   "author": "Eyobel Gebre",

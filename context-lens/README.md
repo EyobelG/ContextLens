@@ -1,7 +1,7 @@
-# ContextLens: Python Tests
+# ContextLens: Verified Tests
 
-A VS Code extension that adds two CodeLens actions above every function, method, and (for
-Python) nested function/method it can find, in **Python, JavaScript, and TypeScript** files:
+A VS Code extension for **Python, JavaScript, and TypeScript** that adds two CodeLens actions
+above every function, method, and nested function/method it can find:
 
 ## 🧪 Generate & Verify Tests
 
@@ -30,7 +30,7 @@ underlines at the relevant lines — instead of a wall of text in a separate fil
 
 ## Install
 
-Search **"ContextLens: Python Tests"** in the VS Code Extensions view, or install directly:
+Search **"ContextLens: Verified Tests"** in the VS Code Extensions view, or install directly:
 [marketplace.visualstudio.com/items?itemName=eyobelg.context-lens-python](https://marketplace.visualstudio.com/items?itemName=eyobelg.context-lens-python)
 
 ## Setup
@@ -83,9 +83,9 @@ details and `AGENTS.md` for the full build/lint/test/package workflow.
   declarations, arrow functions assigned to a variable or class field, class methods) are handled;
   exotic syntax (decorators changing method shape, functions defined inside template-literal
   interpolations) may not be detected. Same philosophy as the Python side — no bundled parser.
-- **displayName still says "Python Tests"** even though JS/TS are now supported — a rename would
-  require another Marketplace collision check, left as a deliberate follow-up rather than done
-  unprompted.
+- **Internal package name still says `context-lens-python`.** The user-facing display name no
+  longer does, but the underlying Marketplace identity (`eyobelg.context-lens-python`) does —
+  changing that would abandon the current listing and publish a brand-new one, so it's left alone.
 - **No CI.** Compile/lint/test aren't enforced automatically on push.
 - **Lexical RAG only.** Retrieval is term-frequency based, not embeddings — fine for small/medium
   repos, weaker on very large ones.

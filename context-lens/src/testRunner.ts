@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { LanguageAdapter } from "./languages/types.js";
 
 export interface TestRunResult { passed: boolean; output: string; durationMs: number; }
 
@@ -15,16 +16,16 @@ export class TestRunCancelledError extends Error {
   constructor() { super("Cancelled by user."); this.name = "TestRunCancelledError"; }
 }
 
-export async function runPythonTests(sourceCode: string, testCode: string, pythonPath: string, cancellation?: CancellationSignal): Promise<TestRunResult> {
+export async function runTests(sourceCode: string, testCode: string, adapter: LanguageAdapter, runnerPath: string, cancellation?: CancellationSignal): Promise<TestRunResult> {
   if (cancellation?.isCancellationRequested) throw new TestRunCancelledError();
 
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "context-lens-"));
-  const testFile = path.join(directory, "test_generated.py");
+  const testFile = path.join(directory, `test_generated${adapter.runnableFileExtension}`);
   const started = Date.now();
   try {
-    await fs.writeFile(testFile, `${sourceCode}\n\n${testCode}\n`, "utf8");
+    await fs.writeFile(testFile, adapter.buildRunnableSource(sourceCode, testCode), "utf8");
     return await new Promise<TestRunResult>((resolve, reject) => {
-      const child = execFile(pythonPath, ["-m", "unittest", "-v", testFile], {
+      const child = execFile(runnerPath, adapter.runArgs(testFile), {
         timeout: 10_000, windowsHide: true, maxBuffer: 1_000_000
       }, (error, stdout, stderr) => {
         subscription?.dispose();

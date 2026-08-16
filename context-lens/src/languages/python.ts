@@ -1,17 +1,11 @@
-export interface DependencyMetadata {
-  functionName: string;
-  className?: string;
-  isMethod: boolean;
-  /** True when this is a `def` nested inside another `def` (not a class) — not independently callable. */
-  isNested: boolean;
-  paramTypes: Record<string, string | undefined>;
-  returnType?: string;
-  importedDependencies: string[];
-  rawCode: string;
-}
+import { CodeLensTarget, DependencyMetadata, LanguageAdapter } from "./types.js";
 
 const DEF_PATTERN = /^([ \t]*)(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?:->\s*([^:]+))?:/gm;
+const SIMPLE_DEF_LINE = /^[ \t]*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(/;
 const CLASS_LINE = /^[ \t]*class\s+([A-Za-z_]\w*)/;
+const CLASS_PATTERN = /^[ \t]*class\s+/;
+const TOP_LEVEL_SYMBOL = /^(?:async\s+)?def\s+([A-Za-z_]\w*)|^class\s+([A-Za-z_]\w*)/;
+const MAX_CHUNK_CHARS = 6_000;
 
 /**
  * Extracts useful Python symbols without requiring a Python parser at extension runtime.
@@ -21,7 +15,7 @@ const CLASS_LINE = /^[ \t]*class\s+([A-Za-z_]\w*)/;
  * sandbox runs it). `focusSymbol`, when given, picks which `def` inside `sourceSlice` to extract
  * metadata for; when omitted, the first `def` found is used (preserves plain-selection behavior).
  */
-export function extractPythonDependencies(documentText: string, sourceSlice: string, focusSymbol?: string): DependencyMetadata {
+function extractDependencies(documentText: string, sourceSlice: string, focusSymbol?: string): DependencyMetadata {
   let target: RegExpMatchArray | undefined;
   for (const match of sourceSlice.matchAll(DEF_PATTERN)) {
     if (focusSymbol && match[2] !== focusSymbol) continue;
@@ -144,3 +138,113 @@ function collectImports(documentText: string): Map<string, string> {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+function findCodeLensTargets(documentText: string): CodeLensTarget[] {
+  const lines = documentText.split("\n");
+  const targets: CodeLensTarget[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = lines[i].match(SIMPLE_DEF_LINE);
+    if (!match) continue;
+    const indent = lines[i].length - lines[i].trimStart().length;
+    const symbolName = match[1];
+    if (indent === 0) {
+      const end = findBlockEnd(lines, i, indent);
+      targets.push({ line: i, containerStartLine: i, containerEndLine: end, symbolName });
+      continue;
+    }
+    const container = findOuterContainerLines(lines, i, indent);
+    const end = findBlockEnd(lines, container.line, container.indent);
+    targets.push({ line: i, containerStartLine: container.line, containerEndLine: end, symbolName });
+  }
+  return targets;
+}
+
+/**
+ * Climbs from an indented `def` up through its ancestors. Stops as soon as it reaches a `class`
+ * line (that's the natural container for a method) or indentation 0 (a plain nested function's
+ * outermost enclosing function), whichever comes first.
+ */
+function findOuterContainerLines(lines: string[], line: number, indent: number): { line: number; indent: number } {
+  let currentLine = line;
+  let currentIndent = indent;
+  while (currentIndent > 0) {
+    const ancestor = findNearestLowerIndentLine(lines, currentLine, currentIndent);
+    if (ancestor === undefined) break;
+    currentLine = ancestor;
+    currentIndent = lines[ancestor].length - lines[ancestor].trimStart().length;
+    if (CLASS_PATTERN.test(lines[ancestor])) break;
+  }
+  return { line: currentLine, indent: currentIndent };
+}
+
+function findNearestLowerIndentLine(lines: string[], fromLine: number, belowIndent: number): number | undefined {
+  for (let line = fromLine - 1; line >= 0; line -= 1) {
+    if (!lines[line].trim()) continue;
+    const indent = lines[line].length - lines[line].trimStart().length;
+    if (indent >= belowIndent) continue;
+    return line;
+  }
+  return undefined;
+}
+
+/** Splits a file into per-function/class chunks (falling back to the whole file) for finer-grained retrieval. */
+function splitIntoChunks(content: string): Array<{ symbol?: string; content: string }> {
+  const lines = content.split("\n");
+  const boundaries: Array<{ start: number; symbol: string }> = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!/^\S/.test(line)) continue;
+    const match = line.match(TOP_LEVEL_SYMBOL);
+    if (match) boundaries.push({ start: i, symbol: match[1] ?? match[2] });
+  }
+  if (boundaries.length === 0) return [{ content: trimChunk(content) }];
+
+  const chunks: Array<{ symbol?: string; content: string }> = [];
+  if (boundaries[0].start > 0) {
+    const preamble = lines.slice(0, boundaries[0].start).join("\n").trim();
+    if (preamble) chunks.push({ symbol: "(module-level)", content: trimChunk(preamble) });
+  }
+  for (let i = 0; i < boundaries.length; i += 1) {
+    const end = i + 1 < boundaries.length ? boundaries[i + 1].start : lines.length;
+    const text = lines.slice(boundaries[i].start, end).join("\n").trim();
+    if (text) chunks.push({ symbol: boundaries[i].symbol, content: trimChunk(text) });
+  }
+  return chunks;
+}
+
+function trimChunk(content: string): string { return content.length > MAX_CHUNK_CHARS ? content.slice(0, MAX_CHUNK_CHARS) : content; }
+
+function classifyFile(name: string, content: string): "test" | "fixture" | "model" | "source" {
+  if (/^(test_|.*_test\.py$)/.test(name)) return "test";
+  if (name === "conftest.py" || /@pytest\.fixture/.test(content)) return "fixture";
+  if (/(class\s+\w+\s*\(|@dataclass|BaseModel|TypedDict)/.test(content)) return "model";
+  return "source";
+}
+
+const STOPWORDS = new Set([
+  "def", "class", "return", "self", "cls", "import", "from", "as", "if", "elif", "else", "for",
+  "while", "try", "except", "finally", "with", "pass", "break", "continue", "lambda", "yield",
+  "raise", "assert", "true", "false", "none", "and", "or", "not", "in", "is", "async", "await",
+  "global", "nonlocal", "del", "py", "pyi"
+]);
+
+export const pythonAdapter: LanguageAdapter = {
+  id: "python",
+  vscodeLanguageIds: ["python"],
+  displayName: "Python",
+  frameworkName: "unittest",
+  fileExtensionPattern: /\.(py|pyi)$/i,
+  testFileNamePattern: /^(test_|.*_test\.py$)/,
+  runnableFileExtension: ".py",
+  codeFencePattern: /```(?:python)?\s*([\s\S]*?)```/i,
+  lineCommentPrefix: "#",
+  stopwords: STOPWORDS,
+  runnerSettingKey: "pythonPath",
+  defaultRunnerPath: "python3",
+  findCodeLensTargets,
+  extractDependencies,
+  splitIntoChunks,
+  classifyFile,
+  buildRunnableSource: (sourceCode, testCode) => `${sourceCode}\n\n${testCode}\n`,
+  runArgs: (testFilePath) => ["-m", "unittest", "-v", testFilePath]
+};

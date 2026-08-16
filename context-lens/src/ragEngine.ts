@@ -1,18 +1,18 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { DependencyMetadata } from "./astExtractor.js";
+import { ChunkKind, DependencyMetadata, LanguageAdapter } from "./languages/types.js";
 
-interface Chunk { file: string; symbol?: string; kind: "test" | "fixture" | "model" | "source"; content: string; }
+interface Chunk { file: string; symbol?: string; kind: ChunkKind; content: string; }
 interface RetrieveOptions { limit?: number; preferTestArtifacts?: boolean; }
 
 const MAX_FILE_BYTES = 512_000;
-const MAX_CHUNK_CHARS = 6_000;
 const EXCLUDED = new Set([".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build"]);
-const TOP_LEVEL_SYMBOL = /^(?:async\s+)?def\s+([A-Za-z_]\w*)|^class\s+([A-Za-z_]\w*)/;
 
 /** Lightweight local, persisted-free retrieval index. It avoids native binaries and API calls. */
 export class WorkspaceRagIndex {
   private chunks: Chunk[] = [];
+
+  constructor(private readonly adapter: LanguageAdapter) {}
 
   async buildWorkspaceIndex(workspaceRoot: string): Promise<void> {
     this.chunks = [];
@@ -25,9 +25,12 @@ export class WorkspaceRagIndex {
    */
   retrieveContext(dependencies: DependencyMetadata, querySnippet: string, options: RetrieveOptions = {}): string {
     const { limit = 5, preferTestArtifacts = true } = options;
-    const terms = tokenize([dependencies.functionName, ...dependencies.importedDependencies, ...Object.values(dependencies.paramTypes), dependencies.returnType ?? "", querySnippet].join(" "));
+    const terms = tokenize(
+      [dependencies.functionName, ...dependencies.importedDependencies, ...Object.values(dependencies.paramTypes), dependencies.returnType ?? "", querySnippet].join(" "),
+      this.adapter.stopwords
+    );
     return this.chunks
-      .map((chunk) => ({ chunk, score: score(chunk, terms, preferTestArtifacts) }))
+      .map((chunk) => ({ chunk, score: score(chunk, terms, preferTestArtifacts, this.adapter.stopwords) }))
       .filter((result) => result.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
@@ -40,15 +43,15 @@ export class WorkspaceRagIndex {
     try { entries = await fs.readdir(current, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       if (entry.isDirectory()) { if (!EXCLUDED.has(entry.name)) await this.walk(root, path.join(current, entry.name)); continue; }
-      if (!entry.isFile() || !/\.(py|pyi)$/i.test(entry.name)) continue;
+      if (!entry.isFile() || !this.adapter.fileExtensionPattern.test(entry.name)) continue;
       const file = path.join(current, entry.name);
       try {
         const stat = await fs.stat(file);
         if (stat.size > MAX_FILE_BYTES) continue;
         const content = await fs.readFile(file, "utf8");
         const relativeFile = path.relative(root, file);
-        const kind = classify(entry.name, content);
-        for (const piece of splitIntoChunks(content)) {
+        const kind = this.adapter.classifyFile(entry.name, content);
+        for (const piece of this.adapter.splitIntoChunks(content)) {
           this.chunks.push({ file: relativeFile, symbol: piece.symbol, kind, content: piece.content });
         }
       } catch { /* unreadable files are intentionally skipped */ }
@@ -56,56 +59,13 @@ export class WorkspaceRagIndex {
   }
 }
 
-/** Splits a file into per-function/class chunks (falling back to the whole file) for finer-grained retrieval. */
-function splitIntoChunks(content: string): Array<{ symbol?: string; content: string }> {
-  const lines = content.split("\n");
-  const boundaries: Array<{ start: number; symbol: string }> = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (!/^\S/.test(line)) continue;
-    const match = line.match(TOP_LEVEL_SYMBOL);
-    if (match) boundaries.push({ start: i, symbol: match[1] ?? match[2] });
-  }
-  if (boundaries.length === 0) return [{ content: trimChunk(content) }];
-
-  const chunks: Array<{ symbol?: string; content: string }> = [];
-  if (boundaries[0].start > 0) {
-    const preamble = lines.slice(0, boundaries[0].start).join("\n").trim();
-    if (preamble) chunks.push({ symbol: "(module-level)", content: trimChunk(preamble) });
-  }
-  for (let i = 0; i < boundaries.length; i += 1) {
-    const end = i + 1 < boundaries.length ? boundaries[i + 1].start : lines.length;
-    const text = lines.slice(boundaries[i].start, end).join("\n").trim();
-    if (text) chunks.push({ symbol: boundaries[i].symbol, content: trimChunk(text) });
-  }
-  return chunks;
-}
-
-function classify(name: string, content: string): Chunk["kind"] {
-  if (/^(test_|.*_test\.py$)/.test(name)) return "test";
-  if (name === "conftest.py" || /@pytest\.fixture/.test(content)) return "fixture";
-  if (/(class\s+\w+\s*\(|@dataclass|BaseModel|TypedDict)/.test(content)) return "model";
-  return "source";
-}
-function trimChunk(content: string): string { return content.length > MAX_CHUNK_CHARS ? content.slice(0, MAX_CHUNK_CHARS) : content; }
-
-// Common Python keywords/builtins are near-universal across any two files and carry no
-// discriminating signal for relevance; excluding them from *query* terms keeps retrieval from
-// matching purely on boilerplate (e.g. two unrelated files both containing "def" and "return").
-const STOPWORDS = new Set([
-  "def", "class", "return", "self", "cls", "import", "from", "as", "if", "elif", "else", "for",
-  "while", "try", "except", "finally", "with", "pass", "break", "continue", "lambda", "yield",
-  "raise", "assert", "true", "false", "none", "and", "or", "not", "in", "is", "async", "await",
-  "global", "nonlocal", "del", "py", "pyi"
-]);
-
-function tokenize(value: string): Set<string> {
+function tokenize(value: string, stopwords: Set<string>): Set<string> {
   const tokens = value.toLowerCase().match(/[a-z_][a-z0-9_]*/g) ?? [];
-  return new Set(tokens.filter((token) => !STOPWORDS.has(token)));
+  return new Set(tokens.filter((token) => !stopwords.has(token)));
 }
 
-function score(chunk: Chunk, terms: Set<string>, preferTestArtifacts: boolean): number {
-  const counts = tokenizeWithCounts(`${chunk.file} ${chunk.symbol ?? ""} ${chunk.content}`);
+function score(chunk: Chunk, terms: Set<string>, preferTestArtifacts: boolean, stopwords: Set<string>): number {
+  const counts = tokenizeWithCounts(`${chunk.file} ${chunk.symbol ?? ""} ${chunk.content}`, stopwords);
   let result = 0;
   for (const term of terms) {
     const count = counts.get(term) ?? 0;
@@ -118,9 +78,10 @@ function score(chunk: Chunk, terms: Set<string>, preferTestArtifacts: boolean): 
   return result;
 }
 
-function tokenizeWithCounts(value: string): Map<string, number> {
+function tokenizeWithCounts(value: string, stopwords: Set<string>): Map<string, number> {
   const counts = new Map<string, number>();
   for (const match of value.toLowerCase().matchAll(/[a-z_][a-z0-9_]*/g)) {
+    if (stopwords.has(match[0])) continue;
     counts.set(match[0], (counts.get(match[0]) ?? 0) + 1);
   }
   return counts;
